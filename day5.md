@@ -713,25 +713,41 @@ CREATE TABLE stocks (
 
 This works, but it leaves a few gaps: `product_name` and `quantity` can be left empty (`NULL`), nothing stops a negative quantity, and the product name is stored as free text — so "Laptop Lenovo", "laptop lenovo", and "Lenovo Laptop" would all be treated as different products.
 
-### ✅ Better Structure
+### ✅ The Better Way — `ALTER` the existing table
+
+Because the table is **already created**, the correct tool is `ALTER TABLE` — you upgrade the structure in place and keep any data you already have. (Dropping and re-creating the table would delete your rows.) The goal is to reach this stronger shape:
+
+- `product_name` → **NOT NULL** + **UNIQUE**
+- `quantity` → **NOT NULL** + **DEFAULT 0** + **CHECK (quantity >= 0)**
+
+**In PostgreSQL / MySQL** — `ALTER` does the whole job:
 
 ```sql
-CREATE TABLE stocks (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_name TEXT    NOT NULL UNIQUE,
-    quantity     INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0)
-);
+-- Clean any bad data FIRST so the new rules don't reject existing rows
+UPDATE stocks SET quantity = 0 WHERE quantity IS NULL;
+
+-- Then alter the columns into the better structure
+ALTER TABLE stocks ALTER COLUMN product_name SET NOT NULL;
+ALTER TABLE stocks ALTER COLUMN quantity     SET NOT NULL;
+ALTER TABLE stocks ALTER COLUMN quantity     SET DEFAULT 0;
+ALTER TABLE stocks ADD CONSTRAINT uq_stocks_product_name UNIQUE (product_name);
+ALTER TABLE stocks ADD CONSTRAINT chk_stocks_quantity    CHECK (quantity >= 0);
 ```
 
-> **Why this is better — same 3 fields, stronger rules:**
-> - **`NOT NULL`** on `product_name` and `quantity` — no half-recorded rows (a stock entry must name a product and have a number).
-> - **`UNIQUE`** on `product_name` — each product appears only once, so you can't accidentally create duplicate stock rows for the same item.
-> - **`DEFAULT 0`** — a new product starts at zero stock automatically if no quantity is given.
-> - **`CHECK (quantity >= 0)`** — the database rejects impossible negative stock.
->
-> *Note:* `AUTOINCREMENT` is SQLite syntax (matching `Day05_practice.db`). In PostgreSQL use `SERIAL` / `GENERATED ALWAYS AS IDENTITY`; in MySQL use `AUTO_INCREMENT`. `CHECK` and `UNIQUE` are standard across all three.
+> *(MySQL spells the NOT NULL step as `ALTER TABLE stocks MODIFY COLUMN product_name VARCHAR(255) NOT NULL;` — same idea, slightly different syntax.)*
 
-**The Table Change:** A new empty `stocks` table now exists. Running `SELECT * FROM stocks;` returns 0 rows until you add products. Its structure:
+**In SQLite** (your `Day05_practice.db`) — `ALTER` can only do *part* of it:
+
+```sql
+-- ✅ UNIQUE can be added without rebuilding, using a unique index:
+CREATE UNIQUE INDEX uq_stocks_product_name ON stocks(product_name);
+```
+
+> ⚠️ **SQLite limitation:** that's as far as `ALTER` gets you. SQLite **cannot** add `NOT NULL`, `DEFAULT`, or `CHECK` to existing columns with `ALTER`. To enforce those, you must use the **rebuild pattern** in [Section 15](#15-restructuring-the-stocks-table-the-proper-way-to-upgrade-it).
+
+> **Why `ALTER` is the right call here:** the table already holds (or will hold) data, so you modify it in place instead of recreating it. Always **clean the data first** (e.g. set NULL quantities to 0) — otherwise the new `NOT NULL` / `CHECK` rules will reject the existing rows.
+
+**The Table Change:** After the `ALTER` (or the SQLite rebuild), `stocks` keeps all its rows but now enforces the stronger structure:
 
 | column | type | constraints |
 |---|---|---|
@@ -739,7 +755,7 @@ CREATE TABLE stocks (
 | product_name | TEXT | NOT NULL, UNIQUE |
 | quantity | INTEGER | NOT NULL, default `0`, must be `>= 0` |
 
-**Example insert once the table exists:**
+**Example insert once the structure is in place:**
 
 ```sql
 INSERT INTO stocks (product_name, quantity)
