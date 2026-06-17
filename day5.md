@@ -2,6 +2,8 @@
 
 Based on the **Day 5 Instructor Guide** and using the `Day05_practice.db` dataset (`customers`, `inventory`, and `sales`), here is an in-depth breakdown of essential SQL functions, how they can be optimized, and how they apply to real-world business operations.
 
+Each section ends with a **🏋️ Practice Exercise** containing a task, a best-practice solution, and the expected output.
+
 ---
 
 ## 1. `CREATE TABLE` and `INSERT INTO`
@@ -18,6 +20,8 @@ VALUES
 ('Jose', 'Rizal', 'jose.rizal@email.com', 'Calamba', 'South Luzon', '2025-10-15', 1, 5000),
 ('Andres', 'Bonifacio', 'andres.b@email.com', 'Manila', 'NCR', '2025-10-16', 2, 8500);
 ```
+
+> **Why this is the better way:** Always list the columns explicitly (never `INSERT INTO customers VALUES (...)`). Explicit columns make the statement resilient to schema changes and let the database auto-generate `customer_id`. A single multi-row `INSERT` is also one transaction instead of many.
 
 **The Table Change:** The `customers` table grows by 2 rows. These new records are now instantly available for the marketing team to pull into their email lists.
 
@@ -73,6 +77,27 @@ The `customers` table grows by **5 rows** (not 2). The newly appended records ap
 
 ---
 
+### 🏋️ Practice Exercise 1
+
+**Task:** Only the NCR customers from `Day05_new_customers.csv` qualify for an early-access promo. Write an `INSERT` that adds **just the NCR new customers** into a fresh `promo_signups` table.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+INSERT INTO promo_signups (first_name, last_name, email, city, region, signup_date, total_orders, total_spent)
+VALUES
+('Lily',  'Chua', 'lily.chua@email.com', 'Manila',      'NCR', '2025-01-05', 2, 5600),
+('James', 'Lim',  'james.lim@email.com', 'Quezon City', 'NCR', '2025-02-15', 1, 850);
+```
+
+*Best-practice note: explicit column list + a single multi-row insert.*
+</details>
+
+**Expected Output:** `promo_signups` gains exactly **2 rows** (Lily Chua, James Lim). Mark, Sarah, and Anne are excluded because they are not in NCR.
+
+---
+
 ## 2. `WHERE` (with `AND`, `OR`, `NOT`)
 
 **What it does:** The `WHERE` clause filters rows based on specific conditions. `AND` requires all conditions to be true, `OR` requires at least one to be true, and `NOT` reverses the condition.
@@ -89,12 +114,40 @@ WHERE region = 'NCR'
   AND category != 'Accessories';
 ```
 
+> **Why this is the better way:** Filtering with `category != 'Accessories'` is clearer and faster than wrapping conditions in `NOT (...)`. Keeping each condition on its own line makes the boolean logic auditable.
+
 **The Report Result:** You will get rows returning big-ticket items from NCR clients:
 
 | customer_name | product_name | total_amount | category |
 |---|---|---|---|
 | Carlos Garcia | Laptop Lenovo | 35000.0 | Electronics |
 | Marco Villanueva | Desktop PC Ryzen 5 | 45000.0 | Electronics |
+
+---
+
+### 🏋️ Practice Exercise 2
+
+**Task:** The Visayas manager wants all transactions **under ₱5,000** that are **either** in the "Accessories" **or** "Peripherals" category.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT customer_name, product_name, total_amount, category
+FROM sales
+WHERE region = 'Visayas'
+  AND total_amount < 5000
+  AND category IN ('Accessories', 'Peripherals');
+```
+
+*Best-practice note: when a column is compared against a list of allowed values, `IN (...)` is cleaner than `(category = 'Accessories' OR category = 'Peripherals')` — and remember to parenthesize OR logic if you do spell it out, so it doesn't break the `AND`.*
+</details>
+
+**Expected Output:** Low-value Visayas rows limited to the two named categories, e.g.:
+
+| customer_name | product_name | total_amount | category |
+|---|---|---|---|
+| Mark Reyes | Wireless Mouse | 2500.0 | Accessories |
 
 ---
 
@@ -114,12 +167,36 @@ WHERE sale_date >= '2025-01-01'
 ORDER BY sale_date ASC;
 ```
 
+> **Why this is the better way:** `BETWEEN '2025-01-01' AND '2025-03-31'` silently drops any row time-stamped on March 31 after midnight (e.g. `2025-03-31 14:00`). The half-open `>= start AND < next-period-start` pattern captures the entire quarter regardless of time component.
+
 **The Report Result:** This returns 17 rows of strictly Q1 sales safely, including:
 
 | sale_date | customer_name | product_name | total_amount |
 |---|---|---|---|
 | 2025-01-05 | Maria Santos | Wireless Mouse | ... |
 | 2025-03-25 | Grace Domingo | Keyboard Mechanical | ... |
+
+---
+
+### 🏋️ Practice Exercise 3
+
+**Task:** Finance now needs **Q2 2025** (April–June) revenue, sorted newest first.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT sale_date, customer_name, product_name, total_amount
+FROM sales
+WHERE sale_date >= '2025-04-01'
+  AND sale_date < '2025-07-01'
+ORDER BY sale_date DESC;
+```
+
+*Best-practice note: keep the half-open range (`< '2025-07-01'`) instead of `BETWEEN ... AND '2025-06-30'` so end-of-day timestamps are not lost.*
+</details>
+
+**Expected Output:** All sales dated `2025-04-01` through `2025-06-30`, most recent at the top.
 
 ---
 
@@ -137,6 +214,8 @@ FROM customers
 WHERE city IN ('Manila', 'Makati', 'Pasig');
 ```
 
+> **Why this is the better way:** `IN (...)` collapses three `OR` clauses into one readable list and avoids operator-precedence bugs that happen when `OR` is mixed with `AND` without parentheses.
+
 **The Report Result:** Returns a clean list of emails ready for targeting:
 
 | name | email | city |
@@ -144,6 +223,26 @@ WHERE city IN ('Manila', 'Makati', 'Pasig');
 | Patrick Ong | patrick.ong@email.com | Makati |
 | Isabella Cruz | isabella.cruz@email.com | Manila |
 | Angela Rivera | angela.rivera@email.com | Pasig |
+
+---
+
+### 🏋️ Practice Exercise 4
+
+**Task:** Marketing wants to **exclude** the three metro cities above and target everyone *else*. Return name, email, and city for all customers **not** in Manila, Makati, or Pasig.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT first_name, last_name, email, city
+FROM customers
+WHERE city NOT IN ('Manila', 'Makati', 'Pasig');
+```
+
+*Best-practice note: `NOT IN` keeps the intent readable. ⚠️ Caveat — if `city` can be `NULL`, `NOT IN` returns no match for those rows; add `OR city IS NULL` if NULL cities should be included.*
+</details>
+
+**Expected Output:** Customers from all other cities (Cebu City, Davao City, Quezon City, Iloilo City, etc.).
 
 ---
 
@@ -161,12 +260,34 @@ FROM sales
 WHERE product_name LIKE 'Laptop%';
 ```
 
+> **Why this is the better way:** A trailing wildcard (`'Laptop%'`) is *sargable* — the database can use an index. A leading wildcard (`'%Laptop%'`) forces a full-table scan.
+
 **The Report Result:** Matches specific rows in the database instantly using indexes:
 
 - Laptop Lenovo
 - Laptop Stand Aluminum
 
 > **Note:** By doing `Laptop%` instead of `%Laptop%`, the database avoids a slow full-table scan.
+
+---
+
+### 🏋️ Practice Exercise 5
+
+**Task:** Find every product whose name **ends with** the word "Pro" (e.g. "Monitor Pro", "Mouse Pro").
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT product_name, category, total_amount
+FROM sales
+WHERE product_name LIKE '%Pro';
+```
+
+*Best-practice note: an "ends-with" search genuinely requires a leading wildcard, which cannot use a normal index. If this query runs often, the better long-term fix is a reversed-string index or a full-text index — call that out rather than pretending `%Pro` is index-friendly.*
+</details>
+
+**Expected Output:** All products whose name terminates in "Pro".
 
 ---
 
@@ -185,6 +306,8 @@ ORDER BY total_spent DESC
 LIMIT 3;
 ```
 
+> **Why this is the better way:** Push the sort + cap into the database with `ORDER BY ... LIMIT` rather than pulling all rows into the app and slicing client-side. For deterministic ties, add a tiebreaker column (e.g. `ORDER BY total_spent DESC, customer_id ASC`).
+
 **The Report Result:**
 
 | name | total_spent |
@@ -192,6 +315,27 @@ LIMIT 3;
 | Patricia Lim | 99350.0 |
 | Patrick Ong | 85000.0 |
 | Roberto Flores | 83600.0 |
+
+---
+
+### 🏋️ Practice Exercise 6
+
+**Task:** Show the **5 lowest-spending** customers (the re-engagement list), with a stable tiebreaker.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT first_name, last_name, total_spent
+FROM customers
+ORDER BY total_spent ASC, customer_id ASC
+LIMIT 5;
+```
+
+*Best-practice note: adding `customer_id ASC` as a tiebreaker makes the result deterministic when two customers have identical `total_spent`.*
+</details>
+
+**Expected Output:** The 5 customers with the smallest `total_spent`, ascending.
 
 ---
 
@@ -210,6 +354,8 @@ GROUP BY region
 ORDER BY total_revenue DESC;
 ```
 
+> **Why this is the better way:** Every non-aggregated column in the `SELECT` (`region`) appears in `GROUP BY`, and aliases (`total_revenue`) make the output self-documenting and reusable in `ORDER BY`.
+
 **The Report Result:**
 
 | region | total_revenue | total_transactions |
@@ -217,6 +363,35 @@ ORDER BY total_revenue DESC;
 | NCR | [Highest Sum] | 18 |
 | Visayas | [Middle Sum] | 9 |
 | Mindanao | [Lowest Sum] | 5 |
+
+---
+
+### 🏋️ Practice Exercise 7
+
+**Task:** For each `category`, report the **number of sales** and the **average sale amount**, sorted by average descending.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT category,
+       COUNT(sale_id)      AS num_sales,
+       AVG(total_amount)   AS avg_sale_amount
+FROM sales
+GROUP BY category
+ORDER BY avg_sale_amount DESC;
+```
+
+*Best-practice note: alias every aggregate and group by the exact non-aggregated column you selected.*
+</details>
+
+**Expected Output:**
+
+| category | num_sales | avg_sale_amount |
+|---|---|---|
+| Electronics | ... | (highest avg) |
+| Peripherals | ... | ... |
+| Accessories | ... | (lowest avg) |
 
 ---
 
@@ -235,6 +410,8 @@ GROUP BY customer_name
 HAVING COUNT(sale_id) >= 2;
 ```
 
+> **Why this is the better way:** Use `WHERE` to filter **rows before** grouping and `HAVING` to filter **groups after** aggregating. Putting an aggregate condition in `WHERE` is a classic error — `HAVING` is the correct place.
+
 **The Report Result:** Filters out one-time buyers, returning repeat names like:
 
 | customer_name | purchase_count |
@@ -242,6 +419,28 @@ HAVING COUNT(sale_id) >= 2;
 | Miguel Torres | 2 |
 | Daniel Tan | 2 |
 | Carlos Garcia | 2 |
+
+---
+
+### 🏋️ Practice Exercise 8
+
+**Task:** Find regions whose **total revenue exceeds ₱100,000**, but only count **Electronics** sales toward that total.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT region, SUM(total_amount) AS electronics_revenue
+FROM sales
+WHERE category = 'Electronics'      -- row filter BEFORE grouping
+GROUP BY region
+HAVING SUM(total_amount) > 100000;  -- group filter AFTER aggregating
+```
+
+*Best-practice note: this exercise shows the division of labor — `WHERE` narrows to Electronics rows first, `HAVING` then filters the summed groups.*
+</details>
+
+**Expected Output:** Only regions whose Electronics-only revenue clears ₱100,000.
 
 ---
 
@@ -261,12 +460,38 @@ INNER JOIN customers c
 WHERE s.category = 'Electronics';
 ```
 
+> **Why this is the better way:** Table aliases (`s`, `c`) plus fully-qualified columns (`s.total_amount`) prevent ambiguity. `INNER JOIN` returns only matched rows. *Real-world caveat:* joining on a concatenated name is fragile — a proper `customer_id` foreign key is the robust design.
+
 **The Report Result:**
 
 | sale_date | product_name | total_amount | email |
 |---|---|---|---|
 | 2025-09-05 | Laptop Lenovo | 35000.0 | carlos.garcia@email.com |
 | 2025-08-10 | Tablet Samsung | 15000.0 | patrick.ong@email.com |
+
+---
+
+### 🏋️ Practice Exercise 9
+
+**Task:** List **all customers and their total number of sales**, including customers who have **never** purchased (show `0` for them).
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT c.first_name, c.last_name,
+       COUNT(s.sale_id) AS purchase_count
+FROM customers c
+LEFT JOIN sales s
+  ON s.customer_name = c.first_name || ' ' || c.last_name
+GROUP BY c.customer_id, c.first_name, c.last_name
+ORDER BY purchase_count DESC;
+```
+
+*Best-practice note: a `LEFT JOIN` keeps non-purchasers; `COUNT(s.sale_id)` (not `COUNT(*)`) correctly yields `0` for them because it ignores NULLs.*
+</details>
+
+**Expected Output:** Every customer listed, with buyers showing their count and non-buyers showing `0`.
 
 ---
 
@@ -288,6 +513,8 @@ SELECT item_name, unit_cost,
 FROM inventory;
 ```
 
+> **Why this is the better way:** `CASE` conditions are evaluated top-to-bottom, so ordering them from low to high means you don't even need the lower bound on later branches; an explicit `ELSE` guarantees no row falls through to `NULL`.
+
 **The Report Result:**
 
 | item_name | unit_cost | price_tier |
@@ -295,6 +522,35 @@ FROM inventory;
 | Mouse Pad XL | 350.0 | Budget Item |
 | Monitor 24-inch | 8500.0 | Mid-Range Item |
 | Desktop PC Ryzen 5 | 45000.0 | Premium Item |
+
+---
+
+### 🏋️ Practice Exercise 10
+
+**Task:** Bucket inventory by stock level: `quantity_on_hand = 0` → `'Out of Stock'`, `1–10` → `'Low Stock'`, otherwise `'In Stock'`.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT item_name, quantity_on_hand,
+    CASE
+        WHEN quantity_on_hand = 0 THEN 'Out of Stock'
+        WHEN quantity_on_hand <= 10 THEN 'Low Stock'
+        ELSE 'In Stock'
+    END AS stock_status
+FROM inventory;
+```
+
+*Best-practice note: order branches so each later `WHEN` only needs its upper bound, and always include `ELSE`.*
+</details>
+
+**Expected Output:**
+
+| item_name | quantity_on_hand | stock_status |
+|---|---|---|
+| New Product XYZ | 0 | Out of Stock |
+| Webcam HD 1080p | 12 | In Stock |
 
 ---
 
@@ -312,12 +568,35 @@ SELECT item_name, quantity_on_hand,
 FROM inventory;
 ```
 
+> **Why this is the better way:** `COALESCE` is ANSI-standard (portable across databases), unlike vendor-specific `IFNULL`/`ISNULL`/`NVL`. Replacing `NULL` at the query layer protects downstream BI tools from null-handling crashes.
+
 **The Report Result:** If any rows lack a date, instead of a blank `NULL` crashing a BI tool, it outputs:
 
 | item_name | quantity_on_hand | restock_status |
 |---|---|---|
 | Webcam HD 1080p | 12 | 2025-09-05 |
 | New Product XYZ | 0 | Never Restocked - Check Status |
+
+---
+
+### 🏋️ Practice Exercise 11
+
+**Task:** Some inventory rows have a `NULL` `unit_cost`. Produce a report that shows `0` instead of `NULL`, and compute total inventory value (`unit_cost × quantity_on_hand`) safely.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT item_name,
+       COALESCE(unit_cost, 0) AS unit_cost,
+       COALESCE(unit_cost, 0) * quantity_on_hand AS inventory_value
+FROM inventory;
+```
+
+*Best-practice note: wrap the nullable column in `COALESCE` **before** arithmetic — `NULL * anything` is `NULL`, which would silently zero out the math otherwise.*
+</details>
+
+**Expected Output:** Every item shows a numeric `unit_cost` and a computed `inventory_value` (never `NULL`).
 
 ---
 
@@ -343,10 +622,38 @@ DELETE FROM inventory
 WHERE item_name = 'Surge Protector 6-outlet';
 ```
 
+> **Why this is the better way:** **Always** pair `UPDATE`/`DELETE` with a precise `WHERE` clause — a missing `WHERE` rewrites or wipes the entire table. Best practice is to run the same `WHERE` as a `SELECT` first to confirm the affected rows.
+
 **The Table Change:**
 
 - All items (like the Desktop PC, Printer, etc.) that previously said `Manila Warehouse` now say `NCR Main Hub`.
 - The total row count in `inventory` drops by 1 because the Surge Protector is permanently gone.
+
+---
+
+### 🏋️ Practice Exercise 12
+
+**Task:** Apply a 10% price increase to every **Premium** item (`unit_cost >= 10000`) — but first verify which rows you'll touch.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+-- Step 1: PREVIEW the affected rows before changing anything
+SELECT item_name, unit_cost
+FROM inventory
+WHERE unit_cost >= 10000;
+
+-- Step 2: Apply the update with the same WHERE
+UPDATE inventory
+SET unit_cost = unit_cost * 1.10
+WHERE unit_cost >= 10000;
+```
+
+*Best-practice note: the "preview SELECT first" habit is the single biggest safeguard against accidental mass updates.*
+</details>
+
+**Expected Output:** Only items costing ₱10,000+ have their `unit_cost` raised by 10%; all other rows are untouched.
 
 ---
 
@@ -363,4 +670,101 @@ ALTER TABLE customers
 ADD COLUMN loyalty_points INTEGER DEFAULT 0;
 ```
 
+> **Why this is the better way:** Specifying `DEFAULT 0` backfills existing rows with a sensible value instead of `NULL`, so downstream code never has to special-case missing points.
+
 **The Table Change:** The `customers` schema is permanently altered. Now, if you run `SELECT * FROM customers;`, every single customer (Patrick Ong, Joy Bautista, etc.) will have a brand new column at the far right called `loyalty_points`, pre-filled with `0`.
+
+---
+
+### 🏋️ Practice Exercise 13
+
+**Task:** Add a `membership_tier` text column that defaults every existing customer to `'Standard'`.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+ALTER TABLE customers
+ADD COLUMN membership_tier TEXT DEFAULT 'Standard';
+```
+
+*Best-practice note: always give a new column a `DEFAULT` so historical rows are populated immediately rather than left `NULL`.*
+</details>
+
+**Expected Output:** A new `membership_tier` column appears on `customers`, with every existing row showing `'Standard'`.
+
+---
+
+## 14. Creating a New Table: `stocks`
+
+**What it does:** `CREATE TABLE` defines a brand-new table and its schema. Here we add a `stocks` table to track stock-level movements (restocks, sales deductions, adjustments) for each inventory item per warehouse — giving you an auditable history instead of only a single "current quantity" number.
+
+**The Business Scenario:** The warehouse team needs to log every stock change over time (who moved what, when, and why) so they can reconcile counts, trace shrinkage, and report stock-on-hand per location.
+
+**The "Better Way" Query:**
+
+```sql
+CREATE TABLE stocks (
+    stock_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id         INTEGER NOT NULL,
+    warehouse       TEXT    NOT NULL,
+    quantity_change INTEGER NOT NULL,                         -- positive = stock in, negative = stock out
+    movement_type   TEXT    NOT NULL DEFAULT 'restock',       -- e.g. 'restock', 'sale', 'adjustment', 'return'
+    movement_date   TEXT    NOT NULL DEFAULT (DATE('now')),
+    notes           TEXT,
+    FOREIGN KEY (item_id) REFERENCES inventory(item_id)
+);
+```
+
+> **Why this is the better way:**
+> - **`PRIMARY KEY AUTOINCREMENT`** gives each movement a unique, auto-generated ID — you never assign it manually.
+> - **`NOT NULL`** on the essential columns prevents half-recorded movements (a stock change with no quantity or no item is meaningless).
+> - **`FOREIGN KEY (item_id) REFERENCES inventory(item_id)`** enforces referential integrity — you can't log stock for an item that doesn't exist in `inventory`.
+> - **`DEFAULT` values** (`'restock'`, `DATE('now')`) make everyday inserts shorter and stamp the date automatically.
+> - A **signed `quantity_change`** (instead of separate "in"/"out" columns) lets you total movements with a single `SUM()` to get current stock on hand.
+>
+> *Note:* `AUTOINCREMENT` and `DATE('now')` are SQLite syntax (matching `Day05_practice.db`). In PostgreSQL use `SERIAL`/`GENERATED ALWAYS AS IDENTITY` and `CURRENT_DATE`; in MySQL use `AUTO_INCREMENT` and `CURRENT_DATE`.
+
+**The Table Change:** A new empty `stocks` table now exists in the database. Running `SELECT * FROM stocks;` returns 0 rows until you start logging movements. Its structure:
+
+| column | type | constraints |
+|---|---|---|
+| stock_id | INTEGER | PRIMARY KEY, auto-generated |
+| item_id | INTEGER | NOT NULL, FK → `inventory.item_id` |
+| warehouse | TEXT | NOT NULL |
+| quantity_change | INTEGER | NOT NULL (signed) |
+| movement_type | TEXT | NOT NULL, default `'restock'` |
+| movement_date | TEXT | NOT NULL, default today's date |
+| notes | TEXT | optional |
+
+**Example insert once the table exists:**
+
+```sql
+INSERT INTO stocks (item_id, warehouse, quantity_change, movement_type, notes)
+VALUES (1, 'NCR Main Hub', 50, 'restock', 'Weekly supplier delivery');
+```
+
+---
+
+### 🏋️ Practice Exercise 14
+
+**Task:** Using the `stocks` table, calculate the **current stock on hand for each item** by summing all its movements, and show only items whose net stock is still positive.
+
+<details>
+<summary><strong>Best-Practice Solution</strong></summary>
+
+```sql
+SELECT i.item_name,
+       SUM(s.quantity_change) AS current_stock
+FROM stocks s
+INNER JOIN inventory i
+  ON i.item_id = s.item_id
+GROUP BY i.item_id, i.item_name
+HAVING SUM(s.quantity_change) > 0
+ORDER BY current_stock DESC;
+```
+
+*Best-practice note: a signed `quantity_change` makes "current stock" a single `SUM()`. `HAVING` filters the aggregated total (current stock), while the `JOIN` brings in the readable item name.*
+</details>
+
+**Expected Output:** One row per item with a positive net balance, showing its name and total quantity on hand, highest first.
