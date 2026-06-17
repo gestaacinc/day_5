@@ -858,3 +858,56 @@ ALTER TABLE stocks ADD CONSTRAINT chk_stocks_quantity   CHECK (quantity >= 0);
 **The Table Change:** Either path leaves you with the same result — the `stocks` table now enforces the better structure, and all your existing rows are preserved (with any `NULL` quantities cleaned to `0`).
 
 **Best practice before restructuring any live table:** take a quick backup first, e.g. `CREATE TABLE stocks_backup AS SELECT * FROM stocks;` — so you can restore instantly if anything goes wrong.
+
+---
+
+### Special Case: You Forgot the `PRIMARY KEY` / `AUTOINCREMENT`
+
+This is the **hardest** thing to fix after the fact, because the primary key and auto-increment are tied to how row IDs are physically stored. Suppose you created the table with a plain `id` and no key:
+
+```sql
+CREATE TABLE stocks (
+    id           INTEGER,        -- ⚠️ no PRIMARY KEY, no AUTOINCREMENT
+    product_name TEXT,
+    quantity     INTEGER
+);
+```
+
+How you add them depends on the database:
+
+#### SQLite (your `Day05_practice.db`) — must rebuild
+
+SQLite **cannot** add `PRIMARY KEY` or `AUTOINCREMENT` to an existing column with `ALTER` — `INTEGER PRIMARY KEY AUTOINCREMENT` must exist at creation time. So you use the rebuild pattern:
+
+```sql
+BEGIN TRANSACTION;
+
+CREATE TABLE stocks_new (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_name TEXT,
+    quantity     INTEGER
+);
+
+INSERT INTO stocks_new (id, product_name, quantity)
+SELECT id, product_name, quantity FROM stocks;
+
+DROP TABLE stocks;
+ALTER TABLE stocks_new RENAME TO stocks;
+
+COMMIT;
+```
+
+#### PostgreSQL — `ALTER` works
+
+```sql
+ALTER TABLE stocks ADD PRIMARY KEY (id);
+ALTER TABLE stocks ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;
+```
+
+#### MySQL — `ALTER` works (one statement)
+
+```sql
+ALTER TABLE stocks MODIFY id INT NOT NULL AUTO_INCREMENT PRIMARY KEY;
+```
+
+> **Key takeaway:** In PostgreSQL/MySQL you can bolt on the primary key and auto-increment with `ALTER`. In **SQLite you cannot** — the primary key / `AUTOINCREMENT` is fixed at creation time, so the rebuild (create → copy → drop → rename) is the only way.
