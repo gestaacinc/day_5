@@ -771,3 +771,74 @@ ORDER BY quantity ASC;
 |---|---|
 | Surge Protector 6-outlet | 3 |
 | Webcam HD 1080p | 8 |
+
+---
+
+## 15. Restructuring the `stocks` Table (the proper way to "upgrade" it)
+
+So you already created the basic 3-field table and now want to apply the stronger rules (`NOT NULL`, `UNIQUE`, `DEFAULT 0`, `CHECK`). **How you do this depends on your database**, because SQLite handles constraint changes very differently from PostgreSQL/MySQL.
+
+### ⚠️ Why you can't just `ALTER` it in SQLite
+
+SQLite's `ALTER TABLE` only supports a few operations: **rename table**, **rename column**, **add column**, and **drop column**. It **cannot** add a `NOT NULL`, `UNIQUE`, or `CHECK` constraint to an existing column. So in SQLite (your `Day05_practice.db`), the official, recommended way to restructure is the **"rebuild" pattern**: create a correctly-shaped new table, copy the data in, swap the names.
+
+### ✅ The Proper Way in SQLite — the 4-step rebuild
+
+```sql
+-- (Optional but recommended) wrap everything in a transaction so it's all-or-nothing
+BEGIN TRANSACTION;
+
+-- Step 1: Create the new, well-structured table under a temporary name
+CREATE TABLE stocks_new (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_name TEXT    NOT NULL UNIQUE,
+    quantity     INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0)
+);
+
+-- Step 2: Copy existing data across.
+--         COALESCE(quantity, 0) protects against any old NULL quantities
+--         that the new NOT NULL column would otherwise reject.
+INSERT INTO stocks_new (id, product_name, quantity)
+SELECT id, product_name, COALESCE(quantity, 0)
+FROM stocks;
+
+-- Step 3: Remove the old table
+DROP TABLE stocks;
+
+-- Step 4: Rename the new table to take the old one's place
+ALTER TABLE stocks_new RENAME TO stocks;
+
+COMMIT;
+```
+
+> **Why this is the proper way:**
+> - It's the approach **recommended in the official SQLite documentation** for changing column constraints.
+> - The **transaction** (`BEGIN`/`COMMIT`) means if any step fails, the whole change rolls back and your original table is untouched.
+> - **`COALESCE(quantity, 0)`** cleans the data on the way in, so the new `NOT NULL` / `CHECK` rules don't reject existing rows.
+> - ⚠️ Before running this, check whether other tables have a **foreign key** pointing at `stocks` — dropping the table can break them. (For your dataset, `stocks` is standalone, so this is safe.)
+
+### ✅ The Proper Way in PostgreSQL / MySQL — direct `ALTER`
+
+These databases *can* modify constraints in place, so you don't need the rebuild:
+
+```sql
+-- Clean any bad data FIRST, so the new rules don't reject existing rows
+UPDATE stocks SET quantity = 0 WHERE quantity IS NULL;
+
+-- Enforce NOT NULL on both columns
+ALTER TABLE stocks ALTER COLUMN product_name SET NOT NULL;
+ALTER TABLE stocks ALTER COLUMN quantity     SET NOT NULL;
+
+-- Give quantity a default
+ALTER TABLE stocks ALTER COLUMN quantity SET DEFAULT 0;
+
+-- Add the UNIQUE and CHECK constraints
+ALTER TABLE stocks ADD CONSTRAINT uq_stocks_product_name UNIQUE (product_name);
+ALTER TABLE stocks ADD CONSTRAINT chk_stocks_quantity   CHECK (quantity >= 0);
+```
+
+> **Note:** MySQL's exact syntax differs slightly (`MODIFY COLUMN product_name TEXT NOT NULL` instead of `ALTER COLUMN ... SET NOT NULL`), but the idea is identical: **clean the data first, then add the constraints.**
+
+**The Table Change:** Either path leaves you with the same result — the `stocks` table now enforces the better structure, and all your existing rows are preserved (with any `NULL` quantities cleaned to `0`).
+
+**Best practice before restructuring any live table:** take a quick backup first, e.g. `CREATE TABLE stocks_backup AS SELECT * FROM stocks;` — so you can restore instantly if anything goes wrong.
