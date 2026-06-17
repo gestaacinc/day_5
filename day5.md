@@ -697,74 +697,77 @@ ADD COLUMN membership_tier TEXT DEFAULT 'Standard';
 
 ## 14. Creating a New Table: `stocks`
 
-**What it does:** `CREATE TABLE` defines a brand-new table and its schema. Here we add a `stocks` table to track stock-level movements (restocks, sales deductions, adjustments) for each inventory item per warehouse — giving you an auditable history instead of only a single "current quantity" number.
+**What it does:** `CREATE TABLE` defines a brand-new table and its schema. Here we add a `stocks` table to track the quantity on hand for each product.
 
-**The Business Scenario:** The warehouse team needs to log every stock change over time (who moved what, when, and why) so they can reconcile counts, trace shrinkage, and report stock-on-hand per location.
+**The Business Scenario:** The warehouse team needs a simple table to record how many units of each product are currently in stock.
 
-**The "Better Way" Query:**
+### Basic Version (the 3 fields you asked for)
 
 ```sql
 CREATE TABLE stocks (
-    stock_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id         INTEGER NOT NULL,
-    warehouse       TEXT    NOT NULL,
-    quantity_change INTEGER NOT NULL,                         -- positive = stock in, negative = stock out
-    movement_type   TEXT    NOT NULL DEFAULT 'restock',       -- e.g. 'restock', 'sale', 'adjustment', 'return'
-    movement_date   TEXT    NOT NULL DEFAULT (DATE('now')),
-    notes           TEXT,
-    FOREIGN KEY (item_id) REFERENCES inventory(item_id)
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_name TEXT,
+    quantity     INTEGER
 );
 ```
 
-> **Why this is the better way:**
-> - **`PRIMARY KEY AUTOINCREMENT`** gives each movement a unique, auto-generated ID — you never assign it manually.
-> - **`NOT NULL`** on the essential columns prevents half-recorded movements (a stock change with no quantity or no item is meaningless).
-> - **`FOREIGN KEY (item_id) REFERENCES inventory(item_id)`** enforces referential integrity — you can't log stock for an item that doesn't exist in `inventory`.
-> - **`DEFAULT` values** (`'restock'`, `DATE('now')`) make everyday inserts shorter and stamp the date automatically.
-> - A **signed `quantity_change`** (instead of separate "in"/"out" columns) lets you total movements with a single `SUM()` to get current stock on hand.
->
-> *Note:* `AUTOINCREMENT` and `DATE('now')` are SQLite syntax (matching `Day05_practice.db`). In PostgreSQL use `SERIAL`/`GENERATED ALWAYS AS IDENTITY` and `CURRENT_DATE`; in MySQL use `AUTO_INCREMENT` and `CURRENT_DATE`.
+This works, but it leaves a few gaps: `product_name` and `quantity` can be left empty (`NULL`), nothing stops a negative quantity, and the product name is stored as free text — so "Laptop Lenovo", "laptop lenovo", and "Lenovo Laptop" would all be treated as different products.
 
-**The Table Change:** A new empty `stocks` table now exists in the database. Running `SELECT * FROM stocks;` returns 0 rows until you start logging movements. Its structure:
+### ✅ Better Structure
+
+```sql
+CREATE TABLE stocks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_name TEXT    NOT NULL UNIQUE,
+    quantity     INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0)
+);
+```
+
+> **Why this is better — same 3 fields, stronger rules:**
+> - **`NOT NULL`** on `product_name` and `quantity` — no half-recorded rows (a stock entry must name a product and have a number).
+> - **`UNIQUE`** on `product_name` — each product appears only once, so you can't accidentally create duplicate stock rows for the same item.
+> - **`DEFAULT 0`** — a new product starts at zero stock automatically if no quantity is given.
+> - **`CHECK (quantity >= 0)`** — the database rejects impossible negative stock.
+>
+> *Note:* `AUTOINCREMENT` is SQLite syntax (matching `Day05_practice.db`). In PostgreSQL use `SERIAL` / `GENERATED ALWAYS AS IDENTITY`; in MySQL use `AUTO_INCREMENT`. `CHECK` and `UNIQUE` are standard across all three.
+
+**The Table Change:** A new empty `stocks` table now exists. Running `SELECT * FROM stocks;` returns 0 rows until you add products. Its structure:
 
 | column | type | constraints |
 |---|---|---|
-| stock_id | INTEGER | PRIMARY KEY, auto-generated |
-| item_id | INTEGER | NOT NULL, FK → `inventory.item_id` |
-| warehouse | TEXT | NOT NULL |
-| quantity_change | INTEGER | NOT NULL (signed) |
-| movement_type | TEXT | NOT NULL, default `'restock'` |
-| movement_date | TEXT | NOT NULL, default today's date |
-| notes | TEXT | optional |
+| id | INTEGER | PRIMARY KEY, auto-generated |
+| product_name | TEXT | NOT NULL, UNIQUE |
+| quantity | INTEGER | NOT NULL, default `0`, must be `>= 0` |
 
 **Example insert once the table exists:**
 
 ```sql
-INSERT INTO stocks (item_id, warehouse, quantity_change, movement_type, notes)
-VALUES (1, 'NCR Main Hub', 50, 'restock', 'Weekly supplier delivery');
+INSERT INTO stocks (product_name, quantity)
+VALUES ('Laptop Lenovo', 50);
 ```
 
 ---
 
 ### 🏋️ Practice Exercise 14
 
-**Task:** Using the `stocks` table, calculate the **current stock on hand for each item** by summing all its movements, and show only items whose net stock is still positive.
+**Task:** Using the `stocks` table, list every product that is **low on stock** (fewer than 10 units), with the lowest quantity shown first.
 
 <details>
 <summary><strong>Best-Practice Solution</strong></summary>
 
 ```sql
-SELECT i.item_name,
-       SUM(s.quantity_change) AS current_stock
-FROM stocks s
-INNER JOIN inventory i
-  ON i.item_id = s.item_id
-GROUP BY i.item_id, i.item_name
-HAVING SUM(s.quantity_change) > 0
-ORDER BY current_stock DESC;
+SELECT product_name, quantity
+FROM stocks
+WHERE quantity < 10
+ORDER BY quantity ASC;
 ```
 
-*Best-practice note: a signed `quantity_change` makes "current stock" a single `SUM()`. `HAVING` filters the aggregated total (current stock), while the `JOIN` brings in the readable item name.*
+*Best-practice note: the `CHECK (quantity >= 0)` constraint guarantees you'll never see a misleading negative value in this report.*
 </details>
 
-**Expected Output:** One row per item with a positive net balance, showing its name and total quantity on hand, highest first.
+**Expected Output:** Only products with fewer than 10 units, lowest quantity at the top — e.g.:
+
+| product_name | quantity |
+|---|---|
+| Surge Protector 6-outlet | 3 |
+| Webcam HD 1080p | 8 |
